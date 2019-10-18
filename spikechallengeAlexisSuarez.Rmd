@@ -1,0 +1,245 @@
+---
+title: "spikedesafie"
+author: "Alexis Suárez"
+date: "13-10-2019"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(readr)
+require(dplyr)
+require(tidyr)
+require(lubridate)
+require(ggplot2)
+require(scales)
+require(quantmod)
+require(gridExtra)
+require(grid)
+library("Hmisc")
+library("corrplot")
+library("PerformanceAnalytics")
+require(tibble)
+library(caret)
+
+```
+
+
+2.-Analisis general de los datos
+
+En un comienzo, es dificil hacer una análisis general de la base de datos sin haberla trabajado un poco, es por esto que este análisis lo realicé después de haber estado moviendo los datos un por un tiempo. Los datos vienen desordenados y hay varias variables por donde podrían ordenarse, más adelante preferentemente ordeno los datos por estación y por fecha para realizar los modelos. Tienen muchos datos duplicados, como la id de la cuenca o codigo de estación que podrían ser los mismos, el nombre de la estación deja de ser relevante luego de un tiempo ya que todo se lleva a números. En relación a los datos faltantes es porque el dataset es un promedio de sensores y si no hay sensores puede faltar este dato o el sensor falla y se pierde el dato, hay también distinta cantidad de datos por estación unas incluso a llegar a una sola medición. La distribuciones varían caudal y precipitaciones al parecer están relacionados por la forma del histograma y la temperatura tiene una normal centrada en 19 grados aprox.
+```{r,echo=FALSE }
+
+caudal_extra <- read_csv("C:/Users/Monitoreo/Desktop/caudal_extra.csv")
+caudal_extra<-data.frame(caudal_extra)
+caudal_extra$codigo_estacion<-as.factor(caudal_extra$codigo_estacion)
+summary(caudal_extra)
+ggplot(caudal_extra, aes(altura))+geom_histogram()
+ggplot(caudal_extra, aes(caudal))+geom_histogram()
+ggplot(caudal_extra, aes(caudal_extra$precip_promedio))+geom_histogram()
+ggplot(caudal_extra, aes(caudal_extra$temp_max_promedio))+geom_histogram()
+res1red <- rcorr(as.matrix(caudal_extra[,c(6:8,13,16,17)]), type = "pearson")
+rest1red<-res1red$r
+respvalue1red<-res1red$P
+corrplot1<-corrplot.mixed(rest1red)
+
+
+
+
+
+
+```
+
+
+
+
+```{r , echo=FALSE,fig.keep='all'}
+time_plot_una_estacion<-function(codigo_estacion,columna, fecha_min, fecha_max){
+  fecha_min=as.Date(fecha_min)
+  fecha_max=as.Date(fecha_max)
+  selected_stations=caudal_extra[caudal_extra$codigo_estacion==codigo_estacion,]
+  selected_stations$fecha=as.Date(selected_stations$fecha)
+  selected_stations=selected_stations[which(selected_stations$fecha>=fecha_min&selected_stations$fecha<=fecha_max),]
+  selected_stations=selected_stations[order(selected_stations$fecha),]
+  plot(selected_stations$fecha,selected_stations[,columna],main=paste(colnames(selected_stations)[columna],"entre",fecha_min,"y",fecha_max,"\n en Estación:",codigo_estacion),xlab="Fecha", ylab=paste(colnames(selected_stations)[columna],"(°C)"),type="l")
+ 
+}
+time_plot_una_estacion(	8132001,16,"1960-01-01","2000-01-01")
+
+time_plot_varias_estacion<-function(codigo_estacion,columnas, fecha_min, fecha_max){
+  fecha_min=as.Date(fecha_min)
+  fecha_max=as.Date(fecha_max)
+  selected_stations=caudal_extra[caudal_extra$codigo_estacion==codigo_estacion,]
+  selected_stations$fecha=as.Date(selected_stations$fecha)
+  selected_stations=selected_stations[which(selected_stations$fecha>=fecha_min&selected_stations$fecha<=fecha_max),]
+  selected_stations=selected_stations[order(selected_stations$fecha),]
+  selected_stations=na.omit(selected_stations[,c(12,columnas)])
+  normalizacion=matrix(NA,nrow =length(columnas),ncol=2)
+  #NORMALIZACIÓN por media
+ 
+  for (l in 2:ncol(selected_stations)) {
+    
+     selected_stations[,l]=(selected_stations[,l]-mean(selected_stations[,l],na.rm = T))/sd(selected_stations[,l],na.rm = T)
+     normalizacion[l-1,1]=max(selected_stations[,l])
+     normalizacion[l-1,2]=min(selected_stations[,l])
+  }
+ #normalizacion=paste(as.character(round(normalizacion,digits = 2)),collapse = "-")
+ 
+cl=c("blue","red","green","yellow","magenta")
+  {plot(selected_stations$fecha,selected_stations[,2],main=paste("Estación [",codigo_estacion,"] entre",fecha_min,"y",fecha_max,"\n Estandarizado por xs=(x-mu)/sigma"),xlab="Fecha",ylab="", col=cl[1],type="l",ylim=c(min(normalizacion[,2]),max(normalizacion[,1])))
+    if(ncol(selected_stations)!=2){
+  for (i in 3:ncol(selected_stations)) {
+    par(new=T)
+    lines(selected_stations$fecha,selected_stations[,i],col=cl[i-1],type="l")
+   
+  }}
+
+  legend("topright",legend=colnames(selected_stations)[2:ncol(selected_stations)],col = cl[1:ncol(selected_stations)-1],pch=1)
+}
+}
+time_plot_varias_estacion(11335002,c(13,16,17),"2017-01-01","2017-07-01")
+```
+
+
+
+```{r, echo=FALSE,fig.keep='all'}
+caudal_extra$mesdia=as.Date(substr(caudal_extra$fecha,6,10),format="%m-%d")
+caudal_extra$estacionclima=ifelse(caudal_extra$mesdia<"2019-03-21"|caudal_extra$mesdia>="2019-12-21","Verano",ifelse(caudal_extra$mesdia<"2019-06-21"&caudal_extra$mesdia>="2019-03-21","Otoño",ifelse(caudal_extra$mesdia<"2019-09-21"&caudal_extra$mesdia>="2019-06-21","Invierno",ifelse(caudal_extra$mesdia<"2019-12-21"&caudal_extra$mesdia>="2019-09-21","Primavera", NA))) )
+caudal_extra$indxcuenca=as.factor(caudal_extra$gauge_id)
+
+str(caudal_extra$gauge_id)
+levels(caudal_extra$indxcuenca)<-c(1:133)
+#caudal_extra$indxcuenca=as.double(caudal_extra$gauge_id)
+#View(caudal_extra[caudal_extra$indxcuenca==1,])
+
+caudal_extra$caudal_extremo=NA
+caudal_extra$precip_extremo=NA
+caudal_extra$temp_extremo=NA
+
+for (i in 1:nlevels(caudal_extra$indxcuenca)) {
+  for (estacionanual in c("Verano", "Otoño", "Invierno", "Primavera")) {
+    indices=which(caudal_extra$indxcuenca==i & caudal_extra$estacionclima==estacionanual)
+caudal_extra$caudal_extremo[indices]=ifelse(caudal_extra[indices,13]>as.double(quantile(caudal_extra[indices ,13],probs = c(0.95), na.rm = T)),1,0)
+caudal_extra$precip_extremo[indices]=ifelse(caudal_extra[indices,16]>as.double(quantile(caudal_extra[indices ,16],probs = c(0.95), na.rm = T)),1,0)
+caudal_extra$temp_extremo[indices]=ifelse(caudal_extra[indices,17]>as.double(quantile(caudal_extra[indices ,17],probs = c(0.95), na.rm = T)),1,0)
+  }
+  #print(i)
+}
+numbersextremos=c()
+altura=c()
+caudal_extra$codigo_cuenca=as.factor(caudal_extra$codigo_cuenca)
+for (i in 1:nlevels(caudal_extra$codigo_cuenca)) {
+  p=levels(caudal_extra$codigo_cuenca)[i]
+  indices=which(caudal_extra$codigo_cuenca==p)
+  numbersextremos[i]=sum(caudal_extra$caudal_extremo[indices],na.rm = T)
+  altura[i]=mean(caudal_extra$altura[indices],na.rm = T)
+}
+barplot(names.arg = levels(caudal_extra$codigo_cuenca)[order(numbersextremos)],numbersextremos[order(numbersextremos)],main="Número de eventos por cuenca",las=2, xlab="Código de cuenca")
+
+
+#barplot(altura[order(numbersextremos)])
+
+
+
+
+```
+4.-Para generar las variables extremas, se realizó primero un analisis por cuenca, tomando cada cuenca y dependiendo de la fecha asignar la estación del año, luego de esto, por cada estación y cuenca obtener los percentiles dichos para cada variable (95) y clasificar en eventos extremos estos o no.
+
+Me parece bastante razonable fijar las variables extremas de esta manera, pero igual podría ser un comportamiento extremo hacia abajo, por ejemplo, que la temperatura fuera muy baja también sería un extremo y eso quizá estaría dentro del percentil 5 y se podría catalogar como extremo. 
+5.-Si, las cuencas son diferentes y unas incluso en el histórico presentando 7 veces la cantidad de eventos extremos que otras. La cuenca con código 73, buscándola en maps se ve que es cercano a Talca cerca de la cordillera, quizá debido a sus condiciones es mucho más probable un evento extremo a una altura de 500 mts aproximadamente, por otro lado la cuenca 128 es a nivel del mar en  la isla grande de tierra del fuego.
+6.- Para realizar este gráfico se sacó el porcentaje de eventos extremos en relación al total de mediciones de manera anual. Luego, se realizó un gráfico mostrando el como se comportaba a lo largo del tiempo esta variable
+```{r}
+caudal_extra$year=as.factor(substr(caudal_extra$fecha,1,4))
+j=1
+excau=c()
+extemp=c()
+exprecip=c()
+years=c()
+porcentajetotal=c()
+for (i in levels(caudal_extra$year)) {
+  aux=caudal_extra[caudal_extra$year==i,]
+  excau[j]=sum(aux$caudal_extremo,na.rm = T)/length(na.omit(aux$caudal_extremo))*100
+  extemp[j]=sum(aux$temp_extremo,na.rm = T)/length(na.omit(aux$temp_extremo))*100
+  exprecip[j]=sum(aux$precip_extremo,na.rm = T)/length(na.omit(aux$precip_extremo))*100
+  porcentajetotal[j]=(sum(aux$caudal_extremo,na.rm = T)+sum(aux$temp_extremo,na.rm = T)+sum(aux$precip_extremo,na.rm = T))/(length(na.omit(aux$caudal_extremo))+length(na.omit(aux$temp_extremo))+length(na.omit(aux$precip_extremo)))
+  years[j]=i
+  j=j+1
+  #print(i)
+}
+plot(x =years,y=excau,type="l" ,col="green",ylab = "Porcentaje de eventos al año %",xlab="Años",main="Porcentaje de eventos extremos en el tiempo")
+abline(lm(excau~as.double(years)),col="green")
+lines(x=years,y=extemp,col="red")
+abline(lm(extemp~as.double(years)),col="red")
+lines(x=years,y=exprecip,col="blue")
+abline(lm(exprecip~as.double(years)),col="blue")
+legend("topright",legend=c("Caudal extremo","Temperatura extrema","Precipitaciones extremas"),col = c("green", "red", "blue"),pch=1)
+
+```
+Realizando una regresión lineal, se puede apreciar como las temperaturas extremas y precipitaciones han ido en aumento a lo largo del tiempo, pero no ocurre con el caudal extremo, puede que ante este aumento de temperatura se genere problemas de sequía que no aumenta el nivel del caudal en los rios.
+7.- Para este modelo se generó un modelo de clasificación como output la variable binaria caudal_extremo, de input se calculó el promedio de los 5 días anteriores del caudal, temperatura y precipitaciones(separando por cada estación y ordenando por la fecha). Además, utilizando las variables de estación de clima y estación de medición como dummy variables. El modelo de clasificación de árbol elegido por tema de clasificación y el tipo de variables, dio como resultado un 68,68% de precisión, lo cual se validó con un 25-fold cross-validation por la cantidad de datos que se entrenó el modelo 120.000 aprox. Para generar esta base de entrenamiento, estaba el problema de un desbalance en el output, ya que exisitían mucho más eventos no extremos que extremos, lo cual podría sesgar nuestro modelo a predecir que todo estaba bien predicho siendo que el modelo que fue entrenado con 90% de ceros como output. Para este desbalance, se tomaron todos los eventos considerados extremos anteriormente y se le agregaron la misma cantidad(aleatorios) de datos considerados como no extremos, así no crear un sesgo en el modelo, además para entrenarlo se mezclaron de forma aleatoria los datos antes de entrar al modelo. Se eligieron 5 días antes para la predicción porque me apreció razonable tomar más de un día, y viendo los datos, me percaté que al haber un aumento en precipitaciones en días anteriores, más de un día anterior, se generaba un evento extremo en el caudal, por lo que podía ser relevante a la hora del modelo. Por lo que para usar este modelo, tendríamos que tomar las mediciones de 5 días anteriores (sin contar el día actual), la estación climática (del día a predecir) y la estación de medición y el modelo tendría un 68% de precisión para predecir o clasificar si habrá un evento extremo o no.
+
+
+```{r}
+
+cntrl<-trainControl(method = "cv",number = 25)
+caudal_extra$verano=(ifelse(caudal_extra$estacionclima=="Verano",1,0))
+caudal_extra$otono=(ifelse(caudal_extra$estacionclima=="Otoño",1,0))
+caudal_extra$invierno=(ifelse(caudal_extra$estacionclima=="Invierno",1,0))
+caudal_extra$primavera=(ifelse(caudal_extra$estacionclima=="Primavera",1,0))
+datamodeling<-na.omit((caudal_extra[,c(12,20,13,16,17,21,24:28)]))
+datamodeling$indxcuenca=as.double(datamodeling$indxcuenca)
+aux2=NULL
+for (i in 1:max(datamodeling$indxcuenca)) {
+  aux=datamodeling[datamodeling$indxcuenca==i,]
+  aux=aux[order(aux$fecha),]
+
+  if(nrow(aux)>5)  {
+  for (col in 3:5) {
+  
+    for (j in 6:nrow(aux)) {
+    aux[j,paste(colnames(aux)[col],"_5dias",sep = "")]=mean(aux[c((j-5):(j-1)),col],na.rm = T)
+    
+    }
+    }
+  aux=na.omit(aux)
+  aux$caudal_extremo=as.factor(aux$caudal_extremo)
+  aux2=rbind(aux2,aux)
+  }
+  #print(i)
+}
+for (i in 1:max(datamodeling$indxcuenca)) {
+  aux2[,paste("dummy_estación_",i,sep = "")]=ifelse(aux2$indxcuenca==i, 1,0)
+ # print(i)
+}
+dataformodel=aux2[,c(6,8:ncol(aux2))]
+
+dataformodel0=dataformodel[dataformodel$caudal_extremo==0,]
+
+set.seed(123)
+numberofdata=nrow(dataformodel[dataformodel$caudal_extremo==1,])
+train_ind <- sample(seq_len(nrow(dataformodel0)), size = numberofdata)
+dataformodeltrain=rbind(dataformodel[dataformodel$caudal_extremo==1,],dataformodel0[train_ind,])
+
+#dataformodeltrain=dataformodel[train_ind,]
+#dataformodeltrain[,c(2:5,9:ncol(dataformodeltrain))]=as.factor(dataformodeltrain[,c(2:5,9:ncol(dataformodeltrain))])
+dataformodeltrain=dataformodeltrain[sample(nrow(dataformodeltrain)),]
+model=train(caudal_extremo~.,data = dataformodeltrain,method = "rpart", trControl = cntrl )
+model
+pred=predict(model, dataformodeltrain[,-1])
+confusionMatrix(pred,dataformodeltrain[,1])
+varImp(model)
+
+
+numberofdata=nrow(dataformodel[dataformodel$caudal_extremo==1,])*3/7
+train_ind <- sample(seq_len(nrow(dataformodel0)), size = numberofdata)
+dataformodeltrain=rbind(dataformodel[dataformodel$caudal_extremo==1,],dataformodel0[train_ind,])
+model=train(caudal_extremo~.,data = dataformodeltrain,method = "rpart", trControl = cntrl )
+model
+```
+
+
+8.-a) En relación a lo anterior las métricas son de precisión, es decir la cantidad de verdaderos positivos dividido por la suma de los falsos positivos y verdaderos positivos. Las variables más importantes son el caudal los 5 días previos, luego la precipitación los 5 días previos y la temperatura de esos días.Luego en menor importancia la dummy variable del verano y las dummy de las estaciones de medición.
+b) Mi modelo es capaz de capturar 68% lo cual es bastante cercano, quizá haciendo un refinado más fino de las variables de input o de la cantidad de días previos a tomar mejoraría bastante en predicción. También podría alterar el balance de la base de datos, para que prediga más los 1 que los 0 y así mover un poco la balanza. Al cambiar esto la precisión aumentó a un 75% es bastante útil pero como que se fuerza un poco al modelo a predecir los eventos extremos.  
+
