@@ -232,11 +232,11 @@ confusionMatrix(pred,dataformodeltrain[,1])
 varImp(model)
 
 
-numberofdata=nrow(dataformodel[dataformodel$caudal_extremo==1,])*3/7
-train_ind <- sample(seq_len(nrow(dataformodel0)), size = numberofdata)
-dataformodeltrain=rbind(dataformodel[dataformodel$caudal_extremo==1,],dataformodel0[train_ind,])
-model=train(caudal_extremo~.,data = dataformodeltrain,method = "rpart", trControl = cntrl )
-model
+numberofdata2=nrow(dataformodel[dataformodel$caudal_extremo==1,])*3/7
+train_ind2 <- sample(seq_len(nrow(dataformodel0)), size = numberofdata2)
+dataformodeltrain2=rbind(dataformodel[dataformodel$caudal_extremo==1,],dataformodel0[train_ind2,])
+model2=train(caudal_extremo~.,data = dataformodeltrain2,method = "rpart", trControl = cntrl )
+model2
 ```
 
 
